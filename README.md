@@ -2,35 +2,41 @@
 
 Projeto focado em limpeza de dados utilizando SQL no DB Browser for SQLite, com um dataset público do Kaggle contendo dados de jogadores do FIFA 21 raspados do sofifa.com.
 
-O valor desse projeto está principalmente no processo de limpeza — os dados vieram com uma variedade grande de problemas reais de formatação que exigiram soluções diferentes para cada caso.
+O valor desse projeto está principalmente no processo de limpeza — os dados vieram com uma variedade grande de problemas reais de formatação que exigiram soluções diferentes para cada caso. Este projeto foi feito antes de eu começar a estudar Power BI, por isso não há dashboard.
 
 ---
 
-## Dataset
+# Objetivo
 
-- **Fonte:** Kaggle — FIFA 21 Raw Dataset
-- **Origem dos dados:** https://www.kaggle.com/datasets/yagunnersya/fifa-21-messy-raw-dataset-for-cleaning-exploring/data
-- **Contexto:** Dataset intencionalmente sujo, típico de dados raspados da web onde cada desenvolvedor front-end estrutura o HTML de forma diferente, tornando os dados de entrada imprevisíveis.
+Transformar um dataset intencionalmente "sujo" em uma base analisável, tratando cada tipo de problema de formatação com SQL, e usar essa base limpa para responder algumas perguntas simples de scouting (agentes livres, jovens promessas, contratos vencendo).
 
 ---
 
-## Exploração Inicial
+# Dataset
 
-Antes de qualquer limpeza, usei `PRAGMA table_info` para mapear todas as colunas e seus tipos — identificando quais estavam como TEXT quando deveriam ser numéricas, e quais tinham nomes com espaços ou caracteres especiais.
-
-```sql
-PRAGMA table_info(fifa21_raw_data);
-```
-
-Colunas com nomes problemáticos como `W/O` e `Release Date` foram renomeadas antes da importação para remover espaços e caracteres especiais, já que isso causa problemas em praticamente qualquer ferramenta de análise.
+- **Fonte:** Kaggle — [FIFA 21 Messy Raw Dataset for Cleaning/Exploring](https://www.kaggle.com/datasets/yagunnersya/fifa-21-messy-raw-dataset-for-cleaning-exploring/data)
+- **Contexto:** dataset intencionalmente sujo, típico de dados raspados da web, onde cada front-end estrutura o HTML de forma diferente, tornando os dados de entrada imprevisíveis.
+- **Registros:** 18.979 jogadores
+- **Atributos:** 77 colunas por jogador (dados pessoais, clube/contrato e atributos de jogo)
+- **Arquivos brutos:** dois CSVs com os mesmos jogadores em formatos diferentes — `fifa21_raw_data.csv` (usado para carregar o banco) e `fifa21 raw data v2.csv` (mesma base, já com parte dos campos padronizados)
 
 ---
 
-## Problemas Encontrados e Soluções
+# Processo
+
+1. Carga de `fifa21_raw_data.csv` em um banco SQLite (`banco_dados/fifa.db`).
+2. Exploração da estrutura da tabela com `PRAGMA table_info(fifa21_raw_data)`, identificando colunas numéricas importadas como TEXT e nomes de coluna problemáticos (espaços, caracteres especiais).
+3. Renomeação de colunas com nomes problemáticos (ex: `W/O`, `Release Date`) antes da importação.
+4. Tratamento campo a campo dos problemas de formatação (detalhado abaixo), reunidos em uma view de limpeza (`fifa_clean_data`).
+5. Exploração da base limpa com queries sobre agentes livres, jovens promessas e contratos perto do fim.
+
+---
+
+# Problemas Encontrados e Soluções
 
 ### Valores monetários — Value, Wage e ReleaseClause
 
-Os três campos vinham como texto com símbolo de euro e sufixos `M` (milhões) e `K` (milhares). Por exemplo: `€67.5M`. Foi necessário remover o símbolo, identificar o sufixo e multiplicar pelo valor correspondente.
+Os três campos vinham como texto com símbolo de euro e sufixos `M` (milhões) e `K` (milhares) — ex: `€67.5M`. Necessário remover o símbolo, identificar o sufixo e multiplicar pelo valor correspondente.
 
 ```sql
 CASE
@@ -40,87 +46,73 @@ CASE
 END as Value_convertido
 ```
 
-O mesmo padrão foi aplicado para Wage e ReleaseClause.
-
----
+O mesmo padrão foi aplicado para `Wage` e `ReleaseClause`.
 
 ### Altura — Height
 
-Vinha no formato americano de pés e polegadas, como `5'9"` ou `5'11"`. Foi necessário extrair os pés e as polegadas separadamente usando INSTR para localizar o apóstrofo e SUBSTR para extrair cada parte, convertendo para centímetros.
+Formato americano de pés e polegadas (ex: `5'9"`). Extraídos pés e polegadas separadamente com `INSTR`/`SUBSTR` e convertidos para centímetros.
 
 ```sql
-SUBSTR(Height, 1, INSTR(Height, '''') - 1) * 30.48 + 
+SUBSTR(Height, 1, INSTR(Height, '''') - 1) * 30.48 +
 REPLACE(SUBSTR(Height, INSTR(Height, '''') + 1), '"', '') * 2.54 AS Height_convertido
 ```
 
----
-
 ### Peso — Weight
 
-Vinha com o sufixo `lbs` em texto. Removido o sufixo e convertido para quilogramas.
+Sufixo `lbs` em texto, removido e convertido para quilogramas.
 
 ```sql
 CAST(REPLACE(Weight, 'lbs', '') AS REAL) * 0.453592 AS Weight_convertido
 ```
 
----
-
 ### Campos com estrelas — WF, SM, IR
 
-Três colunas tinham o caractere `★` junto ao valor numérico. Removido com REPLACE e convertido para número.
+Três colunas traziam o caractere `★` junto ao valor numérico. Removido com `REPLACE` e convertido para número (mesmo padrão nas três).
 
 ```sql
 CAST(REPLACE(WF, '★', '') AS REAL) AS WF_convertido
 ```
 
-O mesmo padrão foi aplicado para SM e IR.
+### AW e DW
 
----
-
-### Campos AW e DW
-
-Inspecionados e estavam limpos — valores categóricos de texto como High, Medium e Low sem necessidade de tratamento.
-
----
+Inspecionados e já estavam limpos — valores categóricos de texto (`High`, `Medium`, `Low`) sem necessidade de tratamento.
 
 ### LoanDateEnd
 
-Jogadores sem data de fim de empréstimo tinham o valor `N/A` em vez de nulo. Convertido para NULL para não interferir em análises futuras.
+Jogadores sem data de fim de empréstimo tinham `N/A` em vez de nulo. Convertido para `NULL`.
 
 ```sql
 CASE WHEN LoanDateEnd = 'N/A' THEN NULL ELSE LoanDateEnd END AS LoanDateEnd_convertido
 ```
 
----
-
 ### Joined
 
-Data de entrada no clube vinha como texto no formato `Jul 1, 2004`. Extraído apenas o ano dos últimos 4 caracteres.
+Data de entrada no clube em texto (`Jul 1, 2004`). Extraído apenas o ano, a partir dos últimos 4 caracteres.
 
 ```sql
 CAST(SUBSTR(Joined, -4) AS INTEGER) AS Joined_convertido
 ```
 
----
-
 ### Team_and_Contract
 
-Duas informações diferentes estavam na mesma coluna separadas por um caractere de newline — o nome do time e o período do contrato. Separado em duas colunas usando INSTR com `CHAR(10)` para localizar a quebra de linha.
+Nome do time e período de contrato vinham juntos na mesma coluna, separados por um caractere de newline. Separado em duas colunas usando `INSTR` com `CHAR(10)`.
 
 ```sql
 SUBSTR(Team_and_Contract, 1, INSTR(Team_and_Contract, CHAR(10)) - 1) AS Teams,
 SUBSTR(Team_and_Contract, INSTR(Team_and_Contract, CHAR(10)) + 1) AS ContractPeriod
 ```
 
----
-
-## Decisões de Limpeza
-
-**ContractPeriod não foi dividido em ano de início e fim na view.** O campo tem casos especiais como `Free` e `On Loan` que quebrariam a extração de ano. A divisão é feita diretamente nas queries quando necessário, usando `SUBSTR(ContractPeriod, -4)` para o ano final e excluindo os casos de Loan com `NOT LIKE '%Loan%'`.
+Um efeito colateral interessante dessa separação: para agentes livres, o campo de clube na verdade traz a nacionalidade do jogador (o jogo não atribui um clube a quem está sem contrato) — por isso, nas análises abaixo, a coluna `Teams` mostra o país, não um clube, quando `ContractPeriod` é `Free`.
 
 ---
 
-## View Final
+# Decisões de Limpeza
+
+`ContractPeriod` não foi dividido em ano de início e fim dentro da view. O campo tem casos especiais como `Free` e `On Loan` que quebrariam a extração de ano — essa divisão é feita diretamente nas queries quando necessário, com `SUBSTR(ContractPeriod, -4)` para o ano final, excluindo os casos de empréstimo com `NOT LIKE '%Loan%'`.
+
+---
+
+# View Final
 
 ```sql
 CREATE VIEW fifa_clean_data AS
@@ -154,11 +146,17 @@ FROM fifa21_raw_data;
 
 ---
 
-## Análises
+# Análises
+
+Do total de 18.979 jogadores, a distribuição por situação contratual é:
+
+| Situação contratual | Jogadores |
+| -------------------- | --------: |
+| Contrato normal       |    17.728 |
+| Empréstimo (Loan)     |     1.013 |
+| Agente livre (Free)   |       238 |
 
 ### 1. Jogadores livres ordenados por habilidade
-
-Jogadores sem clube ordenados pelo OVA atual — oportunidades imediatas de mercado.
 
 ```sql
 SELECT Name, BP, OVA, POT, Teams, ContractPeriod
@@ -168,11 +166,9 @@ ORDER BY OVA DESC
 LIMIT 10;
 ```
 
----
+Os agentes livres mais bem avaliados são Welington Dano (LB, 81) e Juiano Mestres (CB, 81), seguidos por um grupo avaliado em 80 (S. Mandíquez, J. Sildero, E. Schetino, entre outros).
 
 ### 2. Jogadores livres com maior potencial e menos de 24 anos
-
-Jovens sem clube com alto potencial de crescimento — apostas de longo prazo com baixo custo de aquisição.
 
 ```sql
 SELECT Name, BP, OVA, Age, POT, Teams, ContractPeriod
@@ -183,18 +179,16 @@ ORDER BY POT DESC
 LIMIT 10;
 ```
 
----
+O destaque é o mesmo Welington Dano (20 anos, POT 81), seguido por M. Mohamed (22 anos, POT 80) e K. Despodov (23 anos, POT 79) — apostas de longo prazo sem custo de contratação.
 
-### 3. Top 10 jogadores por posição entre os livres
-
-Usando window function para ranquear os melhores de cada posição separadamente.
+### 3. Top jogadores por posição entre os livres
 
 ```sql
 WITH RankedPlayers AS (
-    SELECT 
-        LongName, 
-        BP, 
-        OVA, 
+    SELECT
+        LongName,
+        BP,
+        OVA,
         Teams,
         ROW_NUMBER() OVER(PARTITION BY BP ORDER BY OVA DESC, LongName ASC) AS PosicaoRank
     FROM fifa_clean_data
@@ -206,11 +200,9 @@ WHERE PosicaoRank <= 10
 ORDER BY BP, OVA DESC;
 ```
 
----
+O ranking cobre praticamente todas as posições do campo entre os agentes livres, incluindo goleiro (ex: Jorge Ezequiel Serendero, GK, 80).
 
-### 4. Jogadores com contrato acabando
-
-Jogadores com alto OVA e contrato terminando em 2021 — oportunidades de mercado antes da janela de transferências.
+### 4. Jogadores com contrato acabando em 2021
 
 ```sql
 SELECT Name, BP, OVA, POT, Teams,
@@ -222,15 +214,34 @@ ORDER BY OVA DESC
 LIMIT 10;
 ```
 
----
-
-## Limitações
-
-O OVA é um número útil para comparar jogadores de forma geral, mas não conta tudo. Habilidades específicas, características de jogabilidade e problemas que não aparecem nos atributos podem ser determinantes na hora de avaliar um jogador de verdade. As análises aqui são um ponto de partida, não uma conclusão definitiva sobre quem contratar.
+Entre os contratos (não emprestados) terminando em 2021, os mais bem avaliados são L. Messi (FC Barcelona, 93), Sergio Ramos (Real Madrid, 89) e S. Agüero (Manchester City, 89) — nomes que se tornariam alvo de negociação antes do fim do vínculo.
 
 ---
 
-## Ferramentas utilizadas
+# Limitações
 
-- DB Browser for SQLite
-- Dataset público do Kaggle — FIFA 21 Raw Dataset
+O OVA é útil para comparar jogadores de forma geral, mas não conta tudo. Habilidades específicas, características de jogabilidade e fatores que não aparecem nos atributos podem ser determinantes na avaliação real de um jogador. As análises aqui são um ponto de partida, não uma conclusão definitiva sobre quem contratar.
+
+---
+
+# Ferramentas Utilizadas
+
+- SQL (SQLite) — `banco_dados/fifa.db`
+- DB Browser for SQLite — `sql/fifa.sqbpro`
+- Dataset público do Kaggle — [FIFA 21 Messy Raw Dataset](https://www.kaggle.com/datasets/yagunnersya/fifa-21-messy-raw-dataset-for-cleaning-exploring/data)
+
+---
+
+# Principais Aprendizados
+
+Durante este projeto pratiquei:
+
+- Diagnóstico de estrutura de tabela com `PRAGMA table_info` antes de qualquer limpeza.
+- Limpeza de dados com SQL: conversão de texto para número (`CASE`/`REPLACE`/`CAST`) para valores monetários com sufixos K/M.
+- Manipulação de strings (`SUBSTR`/`INSTR`) para separar campos combinados e converter unidades (pés/polegadas → cm, lbs → kg).
+- Tratamento de valores ausentes representados como texto (`N/A` → `NULL`).
+- Criação de views SQL para centralizar a lógica de limpeza e reutilizá-la em múltiplas queries.
+- Uso de funções de janela (`ROW_NUMBER() OVER (PARTITION BY ...)`) para ranquear jogadores dentro de cada posição.
+- Leitura crítica dos próprios resultados, reconhecendo os limites de uma métrica (OVA) antes de tratá-la como conclusão.
+
+---
